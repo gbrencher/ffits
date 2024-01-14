@@ -15,6 +15,7 @@ import time
 from glob import glob
 import asf_search as asf
 import subprocess
+import yaml
 
 # Set environment variables to call ISCE from the command line
 os.environ['ISCE_HOME'] = os.path.dirname(isce.__file__)
@@ -45,7 +46,7 @@ scene_list=[
 'S1A_IW_SLC__1SDV_20200413T121342_20200413T121409_032109_03B610_2EA6'
            ]
 # change to relative paths
-proc_path = '/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12'
+proc_path = './AT12'
 os.chdir(proc_path)
 
 # download slcs
