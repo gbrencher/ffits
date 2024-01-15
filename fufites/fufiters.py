@@ -17,6 +17,9 @@ import asf_search as asf
 import subprocess
 import yaml
 
+with open("config.yml", 'r') as stream:
+    args = yaml.safe_load(stream)
+
 # Set environment variables to call ISCE from the command line
 os.environ['ISCE_HOME'] = os.path.dirname(isce.__file__)
 os.environ['ISCE_ROOT'] = os.path.dirname(os.environ['ISCE_HOME'])
@@ -25,71 +28,56 @@ os.environ['ISCE_STACK'] = '/mnt/Backups/gbrench/sw/insar_tools/isce2/src/isce2/
 os.environ['PYTHONPATH'] = os.environ['ISCE_STACK']
 os.environ['PATH'] += f":{os.environ['ISCE_STACK']}/topsStack"
 
-# will likely want to parse a text file or yml at some point to get these
-scene_list=[
-'S1A_IW_SLC__1SDV_20191004T121345_20191004T121412_029309_0354B0_F48E',
-'S1A_IW_SLC__1SDV_20191016T121345_20191016T121412_029484_035ABB_373F',
-'S1A_IW_SLC__1SDV_20191028T121345_20191028T121412_029659_0360C3_574E',
-'S1A_IW_SLC__1SDV_20191109T121345_20191109T121412_029834_0366F3_462C',
-'S1A_IW_SLC__1SDV_20191121T121344_20191121T121411_030009_036CFD_787C',
-'S1A_IW_SLC__1SDV_20191203T121344_20191203T121411_030184_03730F_4C1A',
-'S1A_IW_SLC__1SDV_20191215T121344_20191215T121411_030359_03791A_4B57',
-'S1A_IW_SLC__1SDV_20191227T121343_20191227T121410_030534_037F23_3C47',
-'S1A_IW_SLC__1SDV_20200108T121343_20200108T121410_030709_038533_C53D',
-'S1A_IW_SLC__1SDV_20200120T121342_20200120T121409_030884_038B59_8828',
-'S1A_IW_SLC__1SDV_20200201T121342_20200201T121409_031059_039174_1908',
-'S1A_IW_SLC__1SDV_20200213T121341_20200213T121408_031234_039785_41EB',
-'S1A_IW_SLC__1SDV_20200225T121341_20200225T121408_031409_039D91_8F87',
-'S1A_IW_SLC__1SDV_20200308T121341_20200308T121408_031584_03A39B_6624',
-'S1A_IW_SLC__1SDV_20200320T121342_20200320T121409_031759_03A9BC_08F7',
-'S1A_IW_SLC__1SDV_20200401T121342_20200401T121409_031934_03AFE6_E721',
-'S1A_IW_SLC__1SDV_20200413T121342_20200413T121409_032109_03B610_2EA6'
-           ]
-# change to relative paths
-proc_path = './AT12'
+# set local processing path
+proc_path = './data'
 os.chdir(proc_path)
 
+# initialize directories
+os.makedirs(f'{proc_path}/slc', exist_ok=True)
+os.makedirs(f'{proc_path}/orbits', exist_ok=True)
+os.makedirs(f'{proc_path}/aux', exist_ok=True)
+os.makedirs(f'{proc_path}/dem', exist_ok=True)
+
 # download slcs
-results = asf.granule_search(scene_list)
+results = asf.granule_search(args['scene_list'])
 results.download(path=f'{proc_path}/slc', processes=2)
 
-# download dem
+# download dem (padded by 1 degree around aoi, assumes northern hemisphere currently)
 os.chdir(f'{proc_path}/dem')
-subprocess.run(['sardem --bbox 85.9 27.1 87.6 28.6 --xrate 3 --yrate 3 --data-source COP -isce '], shell=True, capture_output=True, text=True) # will need to make bbox an input
+subprocess.run([f"sardem --bbox {args['bbox']['E']-1} {args['bbox']['S']-1} {args['bbox']['W']+1} {args['bbox']['N']+1} --xrate 3 --yrate 3 --data-source COP -isce "], shell=True, capture_output=True, text=True) # will need to make bbox an input
 #!sardem --bbox 85.9 27.1 87.6 28.6 --xrate 3 --yrate 3 --data-source COP -isce 
 
 # stacksentinel to generate run files for cslc workflow
-subprocess.run(["stackSentinel.py -s ./slc -o ./orbits -a ./aux -d ./dem/earthdem_elevation.dem -w ./work -C geometry --bbox '27.64 28.12 86.74 87.13' -W slc -C geometry --num_proc 2"], shell=True, capture_output=True, text=True)
+subprocess.run([f"stackSentinel.py -s {proc_path}/slc -o {proc_path}/orbits -a {proc_path}/aux -d {proc_path}/dem/elevation.dem -w {proc_path}/work -C geometry --bbox '{args['bbox']['S']} {args['bbox']['N']} {args['bbox']['E']} {args['bbox']['W']}' -W slc -C geometry --num_proc {args['cslc_proc']}"], shell=True, capture_output=True, text=True)
 
 # run to CSLCs
-subprocess.run(['./work/run_files/run_01_unpack_topo_reference'], shell=True)
-subprocess.run(['./work/run_files/run_02_unpack_secondary_slc'], shell=True)
-subprocess.run(['./work/run_files/run_03_average_baseline'], shell=True)
-subprocess.run(['./work/run_files/run_04_fullBurst_geo2rdr'], shell=True)
-subprocess.run(['./work/run_files/run_05_fullBurst_resample'], shell=True)
-subprocess.run(['./work/run_files/run_06_extract_stack_valid_region'], shell=True)
-subprocess.run(['./work/run_files/run_07_merge_reference_secondary_slc'], shell=True)
-subprocess.run(['./work/run_files/run_08_grid_baseline'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_01_unpack_topo_reference'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_02_unpack_secondary_slc'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_03_average_baseline'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_04_fullBurst_geo2rdr'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_05_fullBurst_resample'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_06_extract_stack_valid_region'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_07_merge_reference_secondary_slc'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_08_grid_baseline'], shell=True)
 
 # remove run files
-subprocess.run(['rm -r ./work/run_files'], shell=True)
+subprocess.run([f'rm -r {proc_path}/work/run_files'], shell=True)
 # rename to avoid aborting second topsStack run
-subprocess.run(['mv ./work/coreg_secondarys ./work/coreg_secondarys_tmp'], shell=True)
-subprocess.run(['mv ./work/merged ./work/merged_cslcs'], shell=True)
+subprocess.run([f'mv {proc_path}/work/coreg_secondarys {proc_path}/work/coreg_secondarys_tmp'], shell=True)
+subprocess.run([f'mv {proc_path}/work/merged {proc_path}/work/merged_cslcs'], shell=True)
 
 # stacksentinel to generate run files for interferogram workflow
 # NOTE: do not change work directory name to anything other than "work" or things will break
-subprocess.run(["stackSentinel.py -s ./slc -o ./work/orbits -a ./aux -d ./dem/earthdem_elevation.dem -w ./work -C geometry --bbox '27.64 28.12 86.74 87.13' -W interferogram -C geometry --num_proc 1 -c 5 -z 1 -r 5"], shell=True)
+subprocess.run([f"stackSentinel.py -s {proc_path}/slc -o {proc_path}/work/orbits -a {proc_path}/aux -d {proc_path}/dem/elevation.dem -w {proc_path}/work -C geometry --bbox '{args['bbox']['S']} {args['bbox']['N']} {args['bbox']['E']} {args['bbox']['W']}' -W interferogram -C geometry --num_proc {args['insar_proc']} -c {args['insar_connections']} -z {args['azimuth_looks']} -r {args['range_looks']}"], shell=True)
 
 # replace coreg_secondarys 
-subprocess.run(['mv ./work/coreg_secondarys_tmp ./work/coreg_secondarys'], shell=True)
+subprocess.run([f'mv {proc_path}/work/coreg_secondarys_tmp {proc_path}/work/coreg_secondarys'], shell=True)
 
 # run to wrapped interferograms
-subprocess.run(['./work/run_files/run_07_merge_reference_secondary_slc'], shell=True)
-subprocess.run(['./work/run_files/run_08_generate_burst_igram'], shell=True)
-subprocess.run(['./work/run_files/run_09_merge_burst_igram'], shell=True)
-subprocess.run(['./work/run_files/run_10_filter_coherence'], shell=True)
-
+subprocess.run([f'{proc_path}/work/run_files/run_07_merge_reference_secondary_slc'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_08_generate_burst_igram'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_09_merge_burst_igram'], shell=True)
+subprocess.run([f'{proc_path}/work/run_files/run_10_filter_coherence'], shell=True)
 
 # --------------------------------------------------------------------------
 # autoRIFT 
@@ -122,8 +110,6 @@ os.environ['AUTORIFT'] = '/mnt/Backups/gbrench/sw/insar_tools/isce2/src/isce2/co
 os.environ['PYTHONPATH'] = os.environ['AUTORIFT']
 os.environ['PATH'] += f":{os.environ['AUTORIFT']}"
 
-
-
 def select_pairs(scene_list, min_temp_bline, max_temp_bline):
     """
     Create pairs from a list of S1 granules, given a minimum and maximum temporal baseline.
@@ -145,7 +131,7 @@ def select_pairs(scene_list, min_temp_bline, max_temp_bline):
     return pairs 
 
 # will want to expose these choices
-pairs = select_pairs(scene_list, 80, 360)
+pairs = select_pairs(args['scene_list'], args['min_temp_baseline'], args['max_temp_baseline'])
 
 def run_autoRIFT(pair, skip_x=3, skip_y=18, scale_y_chip=6, min_azm_chip=16, max_azm_chip=64,
                  preproc_filter_width=21, mpflag=10, search_limit_x=4, search_limit_y=20):
@@ -246,9 +232,17 @@ os.makedirs(f'{proc_path}/offsets', exist_ok=True)
 for i, pair in enumerate(pairs):
     print(f'working on {i+1}/{len(pairs)}')
     if not os.path.exists(f'{proc_path}/offsets/{pair[0]}-{pair[1]}.nc'):
-        obj = run_autoRIFT(pair)
+        obj = run_autoRIFT(pair=pair,
+                           skip_x=args['azimuth_skips'],
+                           skip_y=args['range_skips'],
+                           min_azm_chip=args['min_azimuth_chip'],
+                           max_azm_chip=args['max_azimuth_chip'],
+                           preproc_filter_width=args['preproc_filter_width'],
+                           mpflag=args['feature_tracking_proc'],
+                           search_limit_x=args['azimuth_search_limit'],
+                           search_limit_y=args['range_search_limit'])
 
-        # interpolate to original dimensions 
+        # interpolate to original cslc dimensions 
         x_coords = np.flip(obj.xGrid[0, :])
         y_coords = obj.yGrid[:, 0]
         
@@ -267,7 +261,7 @@ for i, pair in enumerate(pairs):
                          'azimuth':y_coords_new[:, 0]})
 
         # multilook to match igram
-        da_multilooked = ds.Dx_m.coarsen(x=5, boundary='trim').mean()
+        da_multilooked = ds.Dx_m.coarsen(x=args['range_looks'], y=args['azimuth_looks'], boundary='trim').mean()
         
         # save tif for mintpy
         da_multilooked.rio.to_raster(f'{proc_path}/offsets/dx_m_{pair[0]}-{pair[1]}.tif')
@@ -521,7 +515,7 @@ conn_comp_xml_txt = '''
 conn_comp_xml_file = 'conn_comp.xml'
 
 # list interferograms (will need to edit path)
-igram_list = glob('/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12/work/merged/interferograms/*')
+igram_list = glob(f'{proc_path}/work/merged/interferograms/*')
 
 # unwrap interferograms 
 for i, igram_dir in enumerate(igram_list):
@@ -559,9 +553,11 @@ from glob import glob
 from scipy.interpolate import interpn
 
 # will need to fix paths
-igram_list = glob('/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12/work/merged/interferograms/*')
-range_offset_list = glob('/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12/offsets/*.tif')
-fusion_pair_path = '/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12/fusion_pairs'
+igram_list = glob(f'{proc_path}/work/merged/interferograms/*')
+range_offset_list = glob(f'{proc_path}/offsets/*.tif')
+
+os.makedirs(f'{proc_path}/fusion_pairs', exist_ok=True)
+fusion_pair_path = f'{proc_path}/fusion_pairs'
 
 # copy all igram pairs to fuse folder
 for igram_dir in igram_list:
@@ -594,8 +590,8 @@ for offset_dir in offset_dir_list:
 
     offset_aoi = offset_phase[3250:4750, 2600:4100]
 
-    # write cropped speckle tracking displacement
-    offset_aoi = np.where(phony_coherence > 0.5, offset_aoi, 0)
+    # write cropped feature tracking displacement
+    offset_aoi = np.where(phony_coherence > args['feature_tracking_coherence_mask_threshold'], offset_aoi, 0)
     offset_aoi = offset_aoi.astype(np.float32)
     output_file = f'{offset_dir}/phony_filt_fine_aoi_noest.unw' 
     driver_format = "ISCE"    # Specify the GDAL format for the output (GeoTIFF in this example)
@@ -640,15 +636,14 @@ from mintpy.cli import view, tsview, plot_network, plot_transection
 from mintpy.view import prep_slice, plot_slice
 from pathlib import Path
 
-# NOTE: need to fix paths
 os.makedirs(f'{proc_path}/mintpy_fusion', exist_ok=True)
-mintpy_path = '/mnt/Backups/gbrench/repos/fusits/nbs/imja/agu_push/AT12/mintpy_fusion'
+mintpy_path = './data/mintpy_fusion'
 
 CONFIG_TXT = f'''
 # vim: set filetype=cfg:
 ##------------------------ smallbaselineApp.cfg ------------------------##
 ########## computing resource configuration
-mintpy.compute.maxMemory = 40 #auto for 4, max memory to allocate in GB
+mintpy.compute.maxMemory = {args['max_memory']} #auto for 4, max memory to allocate in GB
 ## parallel processing with dask
 ## currently apply to steps: invert_network, correct_topography
 ## cluster   = none to turn off the parallel computing
@@ -656,9 +651,8 @@ mintpy.compute.maxMemory = 40 #auto for 4, max memory to allocate in GB
 ## numWorker = 80%  to use 80% of locally available cores (for cluster = local only)
 ## config    = none to rollback to the default name (same as the cluster type; for cluster != local)
 mintpy.compute.cluster   = local #[local / slurm / pbs / lsf / none], auto for none, cluster type
-mintpy.compute.numWorker = 4 #[int > 1 / all / num%], auto for 4 (local) or 40 (slurm / pbs / lsf), num of workers
+mintpy.compute.numWorker = {args['num_workers']} #[int > 1 / all / num%], auto for 4 (local) or 40 (slurm / pbs / lsf), num of workers
 mintpy.compute.config    = auto #[none / slurm / pbs / lsf ], auto for none (same as cluster), config name
-
 
 ########## 1. load_data
 ##---------add attributes manually
@@ -678,26 +672,26 @@ mintpy.load.autoPath        = auto  #[yes / no], auto for no, use pre-defined au
 mintpy.load.updateMode      = auto  #[yes / no], auto for yes, skip re-loading if HDF5 files are complete
 mintpy.load.compression     = auto  #[gzip / lzf / no], auto for no.
 ##---------for ISCE only:
-mintpy.load.metaFile        = ../work/reference/IW1.xml  #[path of common metadata file for the stack], i.e.: ./reference/IW1.xml, ./referenceShelve/data.dat
-mintpy.load.baselineDir     = ../work/baselines  #[path of the baseline dir], i.e.: ./baselines
+mintpy.load.metaFile        = {proc_path}/work/reference/IW1.xml  #[path of common metadata file for the stack], i.e.: ./reference/IW1.xml, ./referenceShelve/data.dat
+mintpy.load.baselineDir     = {proc_path}/work/baselines  #[path of the baseline dir], i.e.: ./baselines
 ##---------interferogram stack:
-mintpy.load.unwFile         = ../fusion_pairs/*/*filt_fine_aoi_noest.unw  #[path pattern of unwrapped interferogram files]
-mintpy.load.corFile         = ../fusion_pairs/*/*filt_fine_aoi.cor  #[path pattern of spatial coherence       files]
-mintpy.load.connCompFile    = ../fusion_pairs/*/*conn_comp  #[path pattern of connected components    files], optional but recommended
+mintpy.load.unwFile         = {proc_path}/fusion_pairs/*/*filt_fine_aoi_noest.unw  #[path pattern of unwrapped interferogram files]
+mintpy.load.corFile         = {proc_path}/fusion_pairs/*/*filt_fine_aoi.cor  #[path pattern of spatial coherence       files]
+mintpy.load.connCompFile    = {proc_path}/fusion_pairs/*/*conn_comp  #[path pattern of connected components    files], optional but recommended
 mintpy.load.intFile         = auto  #[path pattern of wrapped interferogram   files], optional
 mintpy.load.magFile         = auto  #[path pattern of interferogram magnitude files], optional
 ##---------geometry:
-mintpy.load.demFile         = ../work/merged/geom_reference/hgt_aoi.rdr  #[path of DEM file]
-mintpy.load.lookupYFile     = ../work/merged/geom_reference/lat_aoi.rdr  #[path of latitude /row   /y coordinate file], not required for geocoded data
-mintpy.load.lookupXFile     = ../work/merged/geom_reference/lon_aoi.rdr  #[path of longitude/column/x coordinate file], not required for geocoded data
-mintpy.load.incAngleFile    = ../work/merged/geom_reference/incLocal_aoi.rdr  #[path of incidence angle file], optional but recommended
-mintpy.load.azAngleFile     = ../work/merged/geom_reference/los_aoi.rdr  #[path of azimuth   angle file], optional
-mintpy.load.shadowMaskFile  = ../work/merged/geom_reference/shadowMask_aoi.rdr  #[path of shadow mask file], optional but recommended
+mintpy.load.demFile         = {proc_path}/work/merged/geom_reference/hgt_aoi.rdr  #[path of DEM file]
+mintpy.load.lookupYFile     = {proc_path}/work/merged/geom_reference/lat_aoi.rdr  #[path of latitude /row   /y coordinate file], not required for geocoded data
+mintpy.load.lookupXFile     = {proc_path}/work/merged/geom_reference/lon_aoi.rdr  #[path of longitude/column/x coordinate file], not required for geocoded data
+mintpy.load.incAngleFile    = {proc_path}/work/merged/geom_reference/incLocal_aoi.rdr  #[path of incidence angle file], optional but recommended
+mintpy.load.azAngleFile     = {proc_path}/work/merged/geom_reference/los_aoi.rdr  #[path of azimuth   angle file], optional
+mintpy.load.shadowMaskFile  = {proc_path}/work/merged/geom_reference/shadowMask_aoi.rdr  #[path of shadow mask file], optional but recommended
 
 ########## 2. modify_network
 ## 1) Network modification based on temporal/perpendicular baselines, date, num of connections etc.
 mintpy.network.tempBaseMax     = auto  #[1-inf, no], auto for no, max temporal baseline in days
-mintpy.network.perpBaseMax     = 150  #[1-inf, no], auto for no, max perpendicular spatial baseline in meter
+mintpy.network.perpBaseMax     = {args['max_perp_baseline']}  #[1-inf, no], auto for no, max perpendicular spatial baseline in meter
 mintpy.network.connNumMax      = auto  #[1-inf, no], auto for no, max number of neighbors for each acquisition
 mintpy.network.startDate       = auto  #[20090101 / no], auto for no
 mintpy.network.endDate         = auto  #[20110101 / no], auto for no
@@ -729,7 +723,6 @@ mintpy.network.maskFile        = auto  #[file name, no], auto for waterMask.h5 o
 mintpy.network.aoiYX           = auto  #[y0:y1,x0:x1 / no], auto for no, area of interest for coherence calculation
 mintpy.network.aoiLALO         = auto  #[S:N,W:E / no], auto for no - use the whole area
 
-
 ########## 3. reference_point
 ## Reference all interferograms to one common point in space
 ## auto - randomly select a pixel with coherence > minCoherence
@@ -739,11 +732,10 @@ mintpy.network.aoiLALO         = auto  #[S:N,W:E / no], auto for no - use the wh
 ## 2) not affected by strong atmospheric turbulence, i.e. ionospheric streaks
 ## 3) close to and with similar elevation as the AOI, to minimize the impact of spatially correlated atmospheric delay
 mintpy.reference.yx            = auto   #[257,151 / auto]
-mintpy.reference.lalo          = 27.904352, 86.870901   #[31.8,130.8 / auto]
+mintpy.reference.lalo          = {args['stable_reference']}   #[31.8,130.8 / auto]
 mintpy.reference.maskFile      = auto   #[filename / no], auto for maskConnComp.h5
 mintpy.reference.coherenceFile = auto   #[filename], auto for avgSpatialCoh.h5
 mintpy.reference.minCoherence  = auto   #[0.0-1.0], auto for 0.85, minimum coherence for auto method
-
 
 ########## quick_overview
 ## A quick assessment of:
@@ -780,7 +772,6 @@ mintpy.unwrapError.numSample       = 100  #[int>1], auto for 100, number of samp
 ## bridgePtsRadius - half size of the window used to calculate the median value of phase difference
 mintpy.unwrapError.ramp            = auto  #[linear / quadratic], auto for no; recommend linear for L-band data
 mintpy.unwrapError.bridgePtsRadius = auto  #[1-inf], auto for 50, half size of the window around end points
-
 
 ########## 5. invert_network
 ## Invert network of interferograms into time-series using weighted least square (WLS) estimator.
@@ -843,14 +834,12 @@ mintpy.troposphericDelay.minCorrelation = auto  #[0.0-1.0], auto for 0
 ## Set the path below to directory that contains the downloaded *.ztd* files
 mintpy.troposphericDelay.gacosDir = auto # [path2directory], auto for "./GACOS"
 
-
 ########## 7. deramp (optional)
 ## Estimate and remove a phase ramp for each acquisition based on the reliable pixels.
 ## Recommended for localized deformation signals, i.e. volcanic deformation, landslide and land subsidence, etc.
 ## NOT recommended for long spatial wavelength deformation signals, i.e. co-, post- and inter-seimic deformation.
 mintpy.deramp          = linear  #[no / linear / quadratic], auto for no - no ramp will be removed
 mintpy.deramp.maskFile = auto  #[filename / no], auto for maskTempCoh.h5, mask file for ramp estimation
-
 
 ########## 8. correct_topography (optional but recommended)
 ## Topographic residual (DEM error) correction
@@ -868,7 +857,6 @@ mintpy.topographicResidual.stepFuncDate      = auto  #[20080529,20190704T1733 / 
 mintpy.topographicResidual.excludeDate       = auto  #[20070321 / txtFile / no], auto for exclude_date.txt
 mintpy.topographicResidual.pixelwiseGeometry = auto  #[yes / no], auto for yes, use pixel-wise geometry info
 
-
 ########## 9.1 residual_RMS (root mean squares for noise evaluation)
 ## Calculate the Root Mean Square (RMS) of residual phase time-series for each acquisition
 ## reference: Yunjun et al. (2019, section 4.9 and 5.4)
@@ -884,7 +872,6 @@ mintpy.residualRMS.cutoff   = auto  #[0.0-inf], auto for 3
 ## reference: Yunjun et al. (2019, section 4.9)
 ## no     - do not change the default reference date (1st date)
 mintpy.reference.date = no   #[reference_date.txt / 20090214 / no], auto for reference_date.txt
-
 
 ########## 10. velocity
 ## Estimate a suite of time functions [linear velocity by default]
@@ -916,7 +903,6 @@ mintpy.timeFunc.uncertaintyQuantification = auto   #[residue, covariance, bootst
 mintpy.timeFunc.timeSeriesCovFile         = auto   #[filename / no], auto for no, time series covariance file
 mintpy.timeFunc.bootstrapCount            = auto   #[int>1], auto for 400, number of iterations for bootstrapping
 
-
 ########## 11.1 geocode (post-processing)
 # for input dataset in radar coordinates only
 # commonly used resolution in meters and in degrees (on equator)
@@ -924,7 +910,7 @@ mintpy.timeFunc.bootstrapCount            = auto   #[int>1], auto for 400, numbe
 # 0.000925926, 0.000833334, 0.000555556, 0.000462963, 0.000370370, 0.000277778, 0.000185185, 0.000092593
 mintpy.geocode              = auto  #[yes / no], auto for yes
 mintpy.geocode.SNWE         = auto  #[-1.2,0.5,-92,-91 / none ], auto for none, output extent in degree
-mintpy.geocode.laloStep     = 0.000092593, 0.000092593  #[-0.000555556,0.000555556 / None], auto for None, output resolution in degree
+mintpy.geocode.laloStep     = {args['pixel_spacing']}  #[-0.000555556,0.000555556 / None], auto for None, output resolution in degree
 mintpy.geocode.interpMethod = auto  #[linear], auto for nearest, interpolation method
 mintpy.geocode.fillValue    = auto  #[np.nan, 0, ...], auto for np.nan, fill value for outliers.
 
@@ -945,24 +931,18 @@ mintpy.plot.maxMemory = auto  #[float], auto for 4, max memory used by one call 
 '''
 
 os.chdir(mintpy_path)
-config_file = f'{mintpy_path}/SenAT12.txt'
+config_file = f'{mintpy_path}/Sen.txt'
 write_config_file(config_file, CONFIG_TXT, mode='w')
 
 # run mintpy
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep load_data'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep modify_network'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep reference_point'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep quick_overview'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep invert_network'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep correct_topography'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep residual_RMS'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep reference_date'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep velocity'], shell=True)
-subprocess.run(['smallbaselineApp.py SenAT12.txt --dostep geocode'], shell=True)
-
-
-
-
-
-
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep load_data'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep modify_network'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep reference_point'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep quick_overview'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep invert_network'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep correct_topography'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep residual_RMS'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep reference_date'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep velocity'], shell=True)
+subprocess.run(['smallbaselineApp.py Sen.txt --dostep geocode'], shell=True)
 
