@@ -29,6 +29,8 @@ dependencies:
   - rioxarray
   - geopandas
   - ipykernel
+  - mintpy
+  - seaborn
   # for ARIA, FRInGE, HyP3, GMTSAR
   - gdal>=3
   # for pyresample
