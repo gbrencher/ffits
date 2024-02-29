@@ -31,6 +31,8 @@ dependencies:
   - ipykernel
   - mintpy
   - seaborn
+  - netcdf4
+  - h5netcdf
   # for ARIA, FRInGE, HyP3, GMTSAR
   - gdal>=3
   # for pyresample
